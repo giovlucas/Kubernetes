@@ -1,0 +1,138 @@
+# Definição do Deployment para criar e gerenciar os Pods NGINX
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment  # Nome do Deployment
+spec:
+  replicas: 3  # Número de réplicas desejadas
+  selector:
+    matchLabels:
+      app: nginx  # Seletor para identificar os Pods gerenciados por este Deployment
+  template:
+    metadata:
+      labels:
+        app: nginx  # Rótulos aplicados aos Pods gerados
+    spec:
+      containers:
+      - name: nginx  # Nome do contêiner
+        image: nginx:1.21.1  # Imagem do contêiner NGINX e sua versão
+        ports:
+        - containerPort: 80  # Porta exposta pelo contêiner
+        readinessProbe:  # Probe para verificar se o contêiner está pronto para aceitar tráfego
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:  # Probe para verificar se o contêiner está vivo
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        resources:  # Limites de recursos para o contêiner
+          limits:
+            cpu: "0.5"
+            memory: "512Mi"
+          requests:
+            cpu: "0.25"
+            memory: "256Mi"
+        securityContext:  # Política de segurança para o contêiner
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          
+# Definição do Service para expor os Pods para o tráfego externo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service  # Nome do Service
+spec:
+  selector:
+    app: nginx  # Seletor para encaminhar o tráfego para os Pods
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      
+# Definição do PersistentVolumeClaim para armazenamento persistente
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nginx-pvc  # Nome do PersistentVolumeClaim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+      
+# Definição do PersistentVolume para vincular com o PersistentVolumeClaim
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nginx-pv  # Nome do PersistentVolume
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  hostPath:
+    path: /data/nginx  # Caminho do host para armazenamento
+      
+# Definição do Secret para gerenciar informações confidenciais
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nginx-secrets  # Nome do Secret
+type: Opaque
+data:
+  username: YWRtaW4=  # Base64 encoded username
+  password: cGFzc3dvcmQ=  # Base64 encoded password
+  
+# Definição da NetworkPolicy para restringir o tráfego de entrada para os Pods do NGINX
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-network-policy  # Nome da NetworkPolicy
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx  # Seletor para os Pods afetados pela política
+  policyTypes:
+    - Ingress  # Tipo de política (apenas ingress)
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              role: backend  # Seletor para permitir o tráfego de Pods com rótulo "role: backend"
+        ports:
+          - protocol: TCP
+            port: 80  # Porta permitida
+  
+# Definição do HorizontalPodAutoscaler para escalonamento automático
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-autoscaler  # Nome do HorizontalPodAutoscaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-deployment  # Nome do Deployment para o qual o escalonamento se aplica
+  minReplicas: 2  # Número mínimo de réplicas
+  maxReplicas: 10  # Número máximo de réplicas
+  metrics:
+    - type: Resource  # Tipo de métrica (utilização de recursos)
+      resource:
+        name: cpu  # Tipo de recurso (CPU)
+        target:
+          type: Utilization  # Tipo de destino (utilização média)
+          averageUtilization: 50  # Utilização média desejada
